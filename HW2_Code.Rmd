@@ -2,7 +2,9 @@
 title: "Transit-Oriented Development in Boston, MA"
 author: "Michael Clifford and Shuai Wang"
 date: '2023-09-22'
-output: html_document
+output: 
+  html_document:
+    code_folding: hide
 editor_options: 
   markdown: 
     wrap: 72
@@ -243,7 +245,8 @@ allTracts.group <-
       left_join(allTracts) %>%
       st_sf() %>%
       mutate(TOD = "Non-TOD")) %>%
-  mutate(MedRent.inf = ifelse(year == "2009", MedRent * 1.19, MedRent)) 
+  mutate(MedRent.inf = ifelse(year == "2009", MedRent * 1.19, MedRent),
+         MedHHInc.inf = ifelse(year == "2009", MedHHInc * 1.19, MedHHInc)) 
 
 ```
 
@@ -257,13 +260,29 @@ ggplot() +
 2. Visualizations
 
 ```{r}
+buffer_clipped = st_intersection(buffer, allTracts.group) %>%
+  st_union() 
+
+
 ggplot() +
-  geom_sf(data = allTracts.group, aes(fill = q5(MedHHInc))) +
+  geom_sf(data = allTracts.group, aes(fill = q5(MedHHInc.inf))) +
+  geom_sf(data = selectCentroids %>% filter(TotalPop != 0) %>% st_union(), color = "red", size = 5, fill = NA) +
   facet_wrap(~year) +
   scale_fill_manual(values = palette5,
-                    labels = qBr(allTracts.group, "MedHHInc"),
+                    labels = qBr(allTracts.group, "MedHHInc.inf"),
                     name = "Med. HH Income\n(Quintile Breaks)") +
-  labs(title = "Med. HH Income", subtitle = "Boston; 2009-2019") +
+  labs(title = "Med. HH Income", subtitle = "Boston; 2009-2019 (Adjusted for Inflation)") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=22))
+
+ggplot() +
+  geom_sf(data = allTracts.group, aes(fill = q5(pctBachelors))) +
+  geom_sf(data = buffer_clipped, color = "red", size = 5, fill = NA) +
+  facet_wrap(~year) +
+  scale_fill_manual(values = palette5,
+                    labels = qBr(allTracts.group, "pctBachelors", 0),
+                    name = "Pct. Bachelors Degree\n(Quintile Breaks)") +
+  labs(title = "Pct. W/ Bachelors Degree", subtitle = "Boston; 2009-2019") +
   mapTheme() + 
   theme(plot.title = element_text(size=22))
 ```
@@ -279,7 +298,7 @@ one up please) To go from wide to long Why do we do this?? Notice we can
 allTracts.Summary <- 
   st_drop_geometry(allTracts.group) %>%
   group_by(year, TOD) %>%
-  summarize(Rent = mean(MedRent, na.rm = T),
+  summarize(Rent = mean(MedRent.inf, na.rm = T),
             Population = mean(TotalPop, na.rm = T),
             Percent_White = mean(pctWhite, na.rm = T),
             Percent_Bach = mean(pctBachelors, na.rm = T),
@@ -317,7 +336,7 @@ allTracts.Summary %>%
   mutate(Value = round(Value, 2)) %>%
   spread(year.TOD, Value) %>%
   kable() %>%
-  kable_styling() %>%
+  kable_styling(bootstrap_options = "striped") %>%
   footnote(general_title = "\n",
            general = "Table 2.3")
 ```
