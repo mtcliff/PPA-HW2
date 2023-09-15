@@ -3,3 +3,6 @@ suffolk co: 025
 ESRI:102686 Mass Mainland Feet
 
 https://hub.arcgis.com/datasets/massgis::mbta-rapid-transit-stops.geojson
+
+B01002001
+Median Age

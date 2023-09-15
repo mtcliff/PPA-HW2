@@ -45,7 +45,7 @@ tracts19 <-
           variables = c("B25026_001E","B02001_002E",
                         "B15001_050E","B15001_009E",
                         "B19013_001E", "B25058_001E",
-                        "B06012_002E"), 
+                        "B06012_002E", "B01002_001E"), 
           year=2019, state=25,
           county=025, geometry=TRUE) %>% 
   st_transform('ESRI:102686')
@@ -55,7 +55,7 @@ tracts09 <-
           variables = c("B25026_001E","B02001_002E",
                         "B15001_050E","B15001_009E",
                         "B19013_001E", "B25058_001E",
-                        "B06012_002E"), 
+                        "B06012_002E", "B01002_001E"), 
           year=2009, state=25,
           county=025, geometry=TRUE) %>% 
   st_transform('ESRI:102686')
@@ -82,7 +82,8 @@ tracts19 <-
          MaleBachelors = B15001_009,
          MedHHInc = B19013_001, 
          MedRent = B25058_001,
-         TotalPoverty = B06012_002)
+         TotalPoverty = B06012_002,
+         MedAge = B01002_001)
 
 tracts09 <- 
   tracts09 %>%
@@ -94,7 +95,8 @@ tracts09 <-
          MaleBachelors = B15001_009,
          MedHHInc = B19013_001, 
          MedRent = B25058_001,
-         TotalPoverty = B06012_002)
+         TotalPoverty = B06012_002,
+         MedAge = B01002_001)
 
 
 # Let's create new rate variables using mutate
@@ -167,11 +169,6 @@ mbtaBuffers <-
       mutate(Legend = "Unioned Buffer"))
 ```
 
-Let's examine both buffers by making a "[small
-multiples](https://www.juiceanalytics.com/writing/better-know-visualization-small-multiples)"
-plot. This type of plot shows multiple views of the same data or
-geographic area. We accomplish this by using the `facet_wrap()`
-{ggplot2} function on the *Legend* column.
 
 ```{r}
 ggplot() +
@@ -186,26 +183,14 @@ Create an sf object with ONLY the unioned buffer from the `septaBuffers`
 spatial data frame.
 
 ```{r}
-buffer <- filter(mbtaBuffers, Legend=="Unioned Buffer")
+buffer_sta <- filter(mbtaBuffers, Legend=="Unioned Buffer")
 ```
 
 ### Spatial Intersection of tracts and buffers
 
 #### Spatial intersection with with `st_centroid()` on polygon centroids
 
-Finally, we are using centroids, or the point at the center of a polygon, to select whether a polygon from `tracts16` intersects the `buffer`. The steps here are:
 
-1.  convert tract polygons to centroids and to the spatial intersect to buffers using the `selection1` approach from above. The resulting geometry type is now a point and not a polygon
-
-2.  drop the geometry so that is becomes a regular non-spatial data frame
-
-3.  join the original `tracts16` data frame using the `GEOID` as the join field. Note that only the `GEOID` column is selected, however the polygon spatial features are also joined.
-
-4.  `st_sf()` is a function to turn it back to an {sf} spatial object
-
-5.  finally the `TotalPop` column is selected and a new field of `Selection_Type` is added
-
-Note: you will get a warning about "st_centroid assumes attributes... don't worry about it.
 
 ```{r}
 selectCentroids <-
@@ -254,6 +239,7 @@ allTracts.group <-
 #plot TOD vs non-TOD areas
 ggplot() +
   geom_sf(data=allTracts.group, mapping = aes(fill = TOD)) +
+  geom_sf(data=mbta)
   mapTheme()
 ```
 
@@ -266,23 +252,46 @@ buffer_clipped = st_intersection(buffer, allTracts.group) %>%
 
 ggplot() +
   geom_sf(data = allTracts.group, aes(fill = q5(MedHHInc.inf))) +
-  geom_sf(data = selectCentroids %>% filter(TotalPop != 0) %>% st_union(), color = "red", size = 5, fill = NA) +
+  #geom_sf(data = selectCentroids %>% st_union(), color = "red", linewidth = 1, fill = NA) +
+  geom_sf(data = buffer_clipped, color = "red", linewidth = 1, fill = NA) +
   facet_wrap(~year) +
   scale_fill_manual(values = palette5,
                     labels = qBr(allTracts.group, "MedHHInc.inf"),
                     name = "Med. HH Income\n(Quintile Breaks)") +
-  labs(title = "Med. HH Income", subtitle = "Boston; 2009-2019 (Adjusted for Inflation)") +
+  labs(title = "Median HH Income", subtitle = "Boston; 2009-2019 (Adjusted for Inflation)") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=22))
+
+ggplot() +
+  geom_sf(data = allTracts.group, aes(fill = q5(MedRent.inf))) +
+  geom_sf(data = buffer_clipped, color = "red", linewidth = 1, fill = NA) +
+  facet_wrap(~year) +
+  scale_fill_manual(values = palette5,
+                    labels = qBr(allTracts.group, "MedRent.inf"),
+                    name = "Med. Rent\n(Quintile Breaks)") +
+  labs(title = "Median Rent", subtitle = "Boston; 2009-2019 (Adjusted for Inflation)") +
   mapTheme() + 
   theme(plot.title = element_text(size=22))
 
 ggplot() +
   geom_sf(data = allTracts.group, aes(fill = q5(pctBachelors))) +
-  geom_sf(data = buffer_clipped, color = "red", size = 5, fill = NA) +
+  geom_sf(data = buffer_clipped, color = "red", linewidth = 1, fill = NA) +
   facet_wrap(~year) +
   scale_fill_manual(values = palette5,
                     labels = qBr(allTracts.group, "pctBachelors", 0),
                     name = "Pct. Bachelors Degree\n(Quintile Breaks)") +
   labs(title = "Pct. W/ Bachelors Degree", subtitle = "Boston; 2009-2019") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=22))
+
+ggplot() +
+  geom_sf(data = allTracts.group, aes(fill = q5(MedAge))) +
+  geom_sf(data = buffer_clipped, color = "red", linewidth = 1, fill = NA) +
+  facet_wrap(~year) +
+  scale_fill_manual(values = palette5,
+                    labels = qBr(allTracts.group, "MedAge"),
+                    name = "Med. Age\n(Quintile Breaks)") +
+  labs(title = "Median Age", subtitle = "Boston; 2009-2019") +
   mapTheme() + 
   theme(plot.title = element_text(size=22))
 ```
@@ -298,11 +307,10 @@ one up please) To go from wide to long Why do we do this?? Notice we can
 allTracts.Summary <- 
   st_drop_geometry(allTracts.group) %>%
   group_by(year, TOD) %>%
-  summarize(Rent = mean(MedRent.inf, na.rm = T),
-            Population = mean(TotalPop, na.rm = T),
-            Percent_White = mean(pctWhite, na.rm = T),
+  summarize(Med_HH_Inc = mean(MedHHInc.inf, na.rm = T),
+            Med_Rent = mean(MedRent.inf, na.rm = T),
             Percent_Bach = mean(pctBachelors, na.rm = T),
-            Percent_Poverty = mean(pctPoverty, na.rm = T))
+            Med_Age = mean(MedAge, na.rm = T))
 ```
 
 ```{r}
@@ -317,14 +325,6 @@ allTracts.Summary %>%
 ```
 
 ### TOD Indicator Tables
-
-```{r}
-#bad table
-kable(allTracts.Summary) %>%
-  kable_styling() %>%
-  footnote(general_title = "\n",
-           general = "Table 2.2")
-```
 
 
 (4.Table)
@@ -341,34 +341,60 @@ allTracts.Summary %>%
            general = "Table 2.3")
 ```
 
+5. Graduated Symbol Map
 
 
 
-### Example of using `multipleRingBuffer()` function
+6. Line Graph/MRB
 
-There is a more comprehensive tutorial on the usage of this function (and the bugs you might encounter) in the Github folder!
+```{r MRB}
+mbta_MRB <- multipleRingBuffer(st_union(mbta),
+                                maxDistance = 31680,
+                                interval =  2640)
+```
 
 ```{r}
-allTracts <- rbind(tracts20,tracts16)
-septa_MRB <- multipleRingBuffer(st_union(septaStops), 47520, 2640)
+ggplot() +
+    geom_sf(data=mbta_MRB) +
+    geom_sf(data=mbta, size=1) +
+    geom_sf(data=st_union(tracts19), fill=NA, size=1.2) +
+    labs(title="Half mile buffers") +
+    mapTheme()
+```
 
-allTracts.rings <-
-  st_join(st_centroid(dplyr::select(allTracts, GEOID, year)),
-          septa_MRB) %>%
+```{r}
+
+tracts19.rings <- tracts19 %>% 
+  select(GEOID, year) %>% 
+  st_centroid() %>% 
+  st_join(mbta_MRB, join = st_intersects) %>%
   st_drop_geometry() %>%
-  left_join(dplyr::select(allTracts, GEOID, MedRent, year), 
+  left_join(dplyr::select(tracts19, GEOID, MedRent, year), 
             by=c("GEOID"="GEOID", "year"="year")) %>%
   st_sf() %>%
   mutate(distance = distance / 5280) #convert to miles
 
+tracts09.rings <- tracts09 %>% 
+  select(GEOID, year) %>% 
+  st_centroid() %>% 
+  st_join(mbta_MRB, join = st_intersects) %>%
+  st_drop_geometry() %>%
+  left_join(dplyr::select(tracts09, GEOID, MedRent, year), 
+            by=c("GEOID"="GEOID", "year"="year")) %>%
+  st_sf() %>%
+  mutate(distance = distance / 5280) #convert to miles
 
+allTracts.rings <- rbind(tracts09.rings, tracts19.rings)
 
-  ggplot() +
-    geom_sf(data=septa_MRB) +
-    geom_sf(data=septaStops, size=1) +
-    geom_sf(data=st_union(tracts20), fill=NA, size=1.2) +
-    labs(title="Half mile buffers") +
-    mapTheme()
+allTracts.rings.summary <- st_drop_geometry(allTracts.rings) %>%
+    group_by(distance, year) %>%
+    summarize(Mean_Rent = mean(MedRent, na.rm=T))
+
+ggplot(allTracts.rings.summary,
+       aes(distance, Mean_Rent, colour=year)) +
+      geom_point(size=3) + 
+  geom_line(size=2)
 
 ```
+
 
