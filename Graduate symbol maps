@@ -1,0 +1,59 @@
+```{r graduate_symbol 2019}
+
+# Calculate centroids
+tract_centroids19 <- st_centroid(tracts19)
+# Create half-mile buffers
+tract_buffers19 <- st_buffer(tract_centroids19, dist = 2640)
+
+clip19 <- 
+  st_intersection(tract_buffers19, mbta) 
+
+summaryTable19 <- clip19 %>%
+  group_by(STATION) %>%
+  summarize(Total_pop = sum(TotalPop, na.rm = TRUE),
+            Rent = mean(MedRent, na.rm = TRUE))
+
+ggplot() + 
+  geom_sf(data = tracts19, fill = "white") + 
+  geom_sf(data = summaryTable19, aes(size = Total_pop), shape = 21, 
+          fill = "lightblue", alpha = 0.7, show.legend = "point") + 
+  scale_size_continuous(range = c(0.5, 12))
+
+ggplot() + 
+  geom_sf(data = tracts19, fill = "white") + 
+  geom_sf(data = summaryTable19, aes(size = Rent), shape = 21, 
+          fill = "lightyellow", alpha = 0.7, show.legend = "point") + 
+  scale_size_continuous(range = c(0.5, 12))
+
+
+```
+
+```{r graduate_symbol 2009}
+
+# Calculate centroids
+tract_centroids09 <- st_centroid(tracts09)
+# Create half-mile buffers
+tract_buffers09 <- st_buffer(tract_centroids09, dist = 2640)
+
+clip09 <- 
+  st_intersection(tract_buffers09, mbta) 
+
+summaryTable09 <- clip %>%
+  group_by(STATION) %>%
+  summarize(Total_pop = sum(TotalPop, na.rm = TRUE),
+            Rent = mean(MedRent, na.rm = TRUE))
+
+ggplot() + 
+  geom_sf(data = tracts09, fill = "white") + 
+  geom_sf(data = summaryTable09, aes(size = Total_pop), shape = 21, 
+          fill = "lightblue", alpha = 0.7, show.legend = "point") + 
+  scale_size_continuous(range = c(0.5, 12))
+
+ggplot() + 
+  geom_sf(data = tracts09, fill = "white") + 
+  geom_sf(data = summaryTable09, aes(size = Rent), shape = 21, 
+          fill = "lightyellow", alpha = 0.7, show.legend = "point") + 
+  scale_size_continuous(range = c(0.5, 12))
+
+
+```
