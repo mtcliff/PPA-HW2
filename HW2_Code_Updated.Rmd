@@ -1,0 +1,452 @@
+---
+title: "Examining Transit-Oriented Development in Boston, MA"
+author: "Michael Clifford and Shuai Wang"
+date: '2023-09-22'
+output: 
+  html_document:
+    code_folding: hide
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## 1. Wrangling the ACS data for 2009 and 2019.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup_packages, warning = FALSE, message = FALSE}
+# Load Libraries
+
+library(tidyverse)
+library(tidycensus)
+library(sf)
+library(kableExtra)
+library(gridExtra)
+
+options(scipen=999)
+options(tigris_class = "sf")
+
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+palette5 <- c("#f0f9e8","#bae4bc","#7bccc4","#43a2ca","#0868ac")
+```
+
+```{r load_key, warning = FALSE, eval = FALSE}
+census_api_key("730e334cd384273fdcda9984e41c6444518d82d6", overwrite = TRUE)
+```
+
+```{r results='hide', warning = FALSE, message = FALSE}
+#Get census tract data
+tracts19 <-  
+  get_acs(geography = "tract",
+          variables = c("B25026_001E","B02001_002E",
+                        "B15001_050E","B15001_009E",
+                        "B19013_001E", "B25058_001E",
+                        "B06012_002E", "B01002_001E"), 
+          year=2019, state=25,
+          county=025, geometry=TRUE) %>% 
+  st_transform('ESRI:102686')
+
+tracts09 <-  
+  get_acs(geography = "tract",
+          variables = c("B25026_001E","B02001_002E",
+                        "B15001_050E","B15001_009E",
+                        "B19013_001E", "B25058_001E",
+                        "B06012_002E", "B01002_001E"), 
+          year=2009, state=25,
+          county=025, geometry=TRUE) %>% 
+  st_transform('ESRI:102686')
+```
+
+```{r}
+# Let's "spread" the data into wide form
+
+tracts19 <- 
+  tracts19 %>%
+  dplyr::select( -NAME, -moe) %>%
+  spread(key = variable, value = estimate) %>%
+  rename(TotalPop = B25026_001, 
+         Whites = B02001_002,
+         FemaleBachelors = B15001_050, 
+         MaleBachelors = B15001_009,
+         MedHHInc = B19013_001, 
+         MedRent = B25058_001,
+         TotalPoverty = B06012_002,
+         MedAge = B01002_001)
+
+tracts09 <- 
+  tracts09 %>%
+  dplyr::select( -NAME, -moe) %>%
+  spread(key = variable, value = estimate) %>%
+  rename(TotalPop = B25026_001, 
+         Whites = B02001_002,
+         FemaleBachelors = B15001_050, 
+         MaleBachelors = B15001_009,
+         MedHHInc = B19013_001, 
+         MedRent = B25058_001,
+         TotalPoverty = B06012_002,
+         MedAge = B01002_001)
+
+# Let's create new rate variables using mutate
+
+tracts19 <- 
+  tracts19 %>%
+  mutate(pctWhite = ifelse(TotalPop > 0, Whites / TotalPop, 0),
+         pctBachelors = ifelse(TotalPop > 0, ((FemaleBachelors + MaleBachelors) / TotalPop), 0),
+         pctPoverty = ifelse(TotalPop > 0, TotalPoverty / TotalPop, 0),
+         year = "2019") %>%
+  dplyr::select(-Whites,-FemaleBachelors,-MaleBachelors,-TotalPoverty)
+
+tracts09 <- 
+  tracts09 %>%
+  mutate(pctWhite = ifelse(TotalPop > 0, Whites / TotalPop, 0),
+         pctBachelors = ifelse(TotalPop > 0, ((FemaleBachelors + MaleBachelors) / TotalPop), 0),
+         pctPoverty = ifelse(TotalPop > 0, TotalPoverty / TotalPop, 0),
+         year = "2009") %>%
+  dplyr::select(-Whites,-FemaleBachelors,-MaleBachelors,-TotalPoverty)
+
+# Combine the tracts from the two years
+allTracts <- rbind(tracts09,tracts19)
+```
+
+
+## 2. Wrangling the MBTA Rapid Transit Stop data.
+
+
+```{r mbta_data}
+
+mbta <- st_read("https://hub.arcgis.com/datasets/massgis::mbta-rapid-transit-stops.geojson", quiet = TRUE)
+
+# Remove Silver Line Stops
+mbta <- mbta %>% filter(LINE != "SILVER")
+
+mbta <- mbta %>% st_transform(st_crs(tracts19))
+```
+
+```{r}
+#create .5 mile buffer from stations
+stopBuffer <- st_buffer(mbta, 2640)
+
+stopUnion <- st_union(stopBuffer)
+
+mbtaBuffers <- 
+  rbind(
+     stopBuffer %>%
+      mutate(Legend = "Buffer") %>%
+      dplyr::select(Legend),
+     stopUnion %>%
+      st_sf() %>%
+      mutate(Legend = "Unioned Buffer"))
+```
+
+```{r}
+buffer <- filter(mbtaBuffers, Legend=="Unioned Buffer")
+```
+
+```{r warning = FALSE, message = FALSE}
+selectCentroids <-
+  st_centroid(tracts19)[buffer,] %>%
+  st_drop_geometry() %>%
+  left_join(., dplyr::select(tracts19, GEOID), by = "GEOID") %>%
+  st_sf() %>%
+  dplyr::select(TotalPop) %>%
+  mutate(Selection_Type = "Select by Centroids")
+```
+
+```{r warning = FALSE, message = FALSE}
+#join TOD and non-TOD tracts by centroid method
+allTracts.group <- 
+  rbind(
+    st_centroid(allTracts)[buffer,] %>%
+      st_drop_geometry() %>%
+      left_join(allTracts) %>%
+      st_sf() %>%
+      mutate(TOD = "TOD"),
+    st_centroid(allTracts)[buffer, op = st_disjoint] %>%
+      st_drop_geometry() %>%
+      left_join(allTracts) %>%
+      st_sf() %>%
+      mutate(TOD = "Non-TOD")) %>%
+  #adjust for inflation
+  mutate(MedRent.inf = ifelse(year == "2009", MedRent * 1.19, MedRent),
+         MedHHInc.inf = ifelse(year == "2009", MedHHInc * 1.19, MedHHInc)) 
+
+```
+
+```{r plot_tod, warning = FALSE, message = FALSE}
+#plot TOD vs non-TOD areas
+
+ggplot() +
+  geom_sf(data=allTracts.group, mapping = aes(fill = TOD)) +
+  geom_sf(data=mbta, aes(color = ""), size= 1.5, alpha = 0.7) +
+   scale_color_manual(values = "black",
+                     name = "MBTA Transit Stop") +
+  labs(title="TOD and non-TOD Tracts", 
+       subtitle="Suffolk County, MA", 
+       caption="Figure 2.1") +
+  mapTheme()
+```
+
+
+## 3. Comparing TOD and non-TOD areas within and between 2009 and 2019
+
+
+```{r multiple_vis, warning = FALSE, message = FALSE}
+buffer_clipped = st_intersection(buffer, allTracts.group) %>%
+  st_union() 
+
+#geom_sf(data = selectCentroids %>% st_union(), color = "red", linewidth = 1, fill = NA) +
+
+ggplot() +
+  geom_sf(data = allTracts.group, aes(fill = q5(MedHHInc.inf))) +
+  geom_sf(data = buffer_clipped, aes(color = ""), linewidth = 1, fill = NA) +
+  facet_wrap(~year) +
+  scale_color_manual(values = "red",
+                     name = "1/2 Mile to Transit") +
+  scale_fill_manual(values = palette5,
+                    labels = qBr(allTracts.group, "MedHHInc.inf"),
+                    name = "Med. HH Income\n(Quintile Breaks)") +
+  labs(title = "Median HH Income", subtitle = "Suffolk County; 2009-2019\n(Adjusted for Inflation)") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=20))
+
+ggplot() +
+  geom_sf(data = allTracts.group, aes(fill = q5(MedRent.inf))) +
+  geom_sf(data = buffer_clipped, aes(color = ""), linewidth = 1, fill = NA) +
+  facet_wrap(~year) +
+  scale_color_manual(values = "red",
+                     name = "1/2 Mile to Transit") +
+  scale_fill_manual(values = palette5,
+                    labels = qBr(allTracts.group, "MedRent.inf"),
+                    name = "Med. Rent\n(Quintile Breaks)") +
+  labs(title = "Median Rent", subtitle = "Suffolk County; 2009-2019\n(Adjusted for Inflation)") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=20))
+
+ggplot() +
+  geom_sf(data = allTracts.group, aes(fill = q5(pctBachelors))) +
+  geom_sf(data = buffer_clipped, aes(color = ""), linewidth = 1, fill = NA) +
+  facet_wrap(~year) +
+  scale_color_manual(values = "red",
+                     name = "1/2 Mile to Transit") +
+  scale_fill_manual(values = palette5,
+                    labels = qBr(allTracts.group, "pctBachelors", 0),
+                    name = "Pct. Bachelors Degree\n(Quintile Breaks)") +
+  labs(title = "Pct. W/ Bachelors Degree", subtitle = "Suffolk County; 2009-2019") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=20))
+
+ggplot() +
+  geom_sf(data = allTracts.group, aes(fill = q5(MedAge))) +
+  geom_sf(data = buffer_clipped, aes(color = ""), linewidth = 1, fill = NA) +
+  facet_wrap(~year) +
+  scale_color_manual(values = "red",
+                    name = "1/2 Mile to Transit") +
+  scale_fill_manual(values = palette5,
+                    labels = qBr(allTracts.group, "MedAge"),
+                    name = "Med. Age\n(Quintile Breaks)") +
+  labs(title = "Median Age", subtitle = "Suffolk County; 2009-2019") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=20))
+
+```
+
+Figure 3.1
+
+```{r summary_table, warning = FALSE, message = FALSE}
+#Create summary table first
+allTracts.Summary <- 
+  st_drop_geometry(allTracts.group) %>%
+  group_by(year, TOD) %>%
+  summarize(Med_HH_Inc = mean(MedHHInc.inf, na.rm = T),
+            Med_Rent = mean(MedRent.inf, na.rm = T),
+            Percent_Bach = mean(pctBachelors, na.rm = T),
+            Med_Age = mean(MedAge, na.rm = T))
+```
+
+```{r table}
+#table
+allTracts.Summary %>%
+  unite(year.TOD, year, TOD, sep = ": ", remove = T) %>%
+  gather(Variable, Value, -year.TOD) %>%
+  mutate(Value = round(Value, 2)) %>%
+  spread(year.TOD, Value) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  footnote(general_title = "\n",
+           general = "Figure 3.2")
+```
+
+```{r bar_plots, warning = FALSE, message = FALSE}
+#bar plots
+allTracts.Summary %>%
+  gather(Variable, Value, -year, -TOD) %>%
+  ggplot(aes(year, Value, fill = TOD)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~Variable, scales = "free", ncol=5) +
+  scale_fill_manual(values = c("#bae4bc", "#0868ac")) +
+  labs(title = "Indicator differences across time and space",
+       caption = "Figure 3.3") +
+  plotTheme() + theme(legend.position="bottom") +
+  theme(plot.title = element_text(size=20))
+```
+
+5. Graduated Symbol Map
+
+```{r graduate_symbol 2019, warning = FALSE, message = FALSE}
+
+# Calculate centroids
+tract_centroids19 <- st_centroid(tracts19)
+# Create half-mile buffers
+tract_buffers19 <- st_buffer(tract_centroids19, dist = 2640)
+
+clip19 <- 
+  st_intersection(tract_buffers19, mbta) 
+
+summaryTable19 <- clip19 %>%
+  group_by(STATION) %>%
+  summarize(Total_pop = sum(TotalPop, na.rm = TRUE),
+            Rent = mean(MedRent, na.rm = TRUE))
+
+ggplot() + 
+  geom_sf(data = st_union(tracts19), fill = "lightgray") + 
+  geom_sf(data = summaryTable19, aes(size = Total_pop, fill = Total_pop), shape = 21, 
+          alpha = 0.7) + 
+  scale_size_continuous(range = c(0.5, 12)) +
+  scale_fill_gradient(low = 'white', high = 'darkblue') +
+  labs(title = "Population within 1/2 Mile of\nRapid Transit Stops", subtitle = "Suffolk County, 2019",
+       caption = "Figure 3.4") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=20))
+ggplot() + 
+  geom_sf(data = st_union(tracts19), fill = "lightgray") + 
+  geom_sf(data = summaryTable19, aes(size = Rent, fill = Rent), shape = 21, 
+         alpha = 0.7, show.legend = "point") + 
+  scale_size_continuous(range = c(0.5, 12)) +
+  scale_fill_gradient(low = 'white', high = '#756bb1') +
+  labs(title = "Median Rent within 1/2 Mile of\nRapid Transit Stops", subtitle = "Suffolk County, 2019",
+       caption = "Figure 3.5") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=20))
+
+```
+
+ ```{r graduate_symbol 2009, warning = FALSE, message = FALSE}
+# 
+# # Calculate centroids
+# tract_centroids09 <- st_centroid(tracts09)
+# # Create half-mile buffers
+# tract_buffers09 <- st_buffer(tract_centroids09, dist = 2640)
+# 
+# clip09 <- 
+#   st_intersection(tract_buffers09, mbta) 
+# 
+# summaryTable09 <- clip09 %>%
+#   group_by(STATION) %>%
+#   summarize(Total_pop = sum(TotalPop, na.rm = TRUE),
+#             Rent = mean(MedRent, na.rm = TRUE))
+# 
+# ggplot() + 
+#   geom_sf(data = tracts09, fill = "white") + 
+#   geom_sf(data = summaryTable09, aes(size = Total_pop), shape = 21, 
+#           fill = "lightblue", alpha = 0.7, show.legend = "point") + 
+#   scale_size_continuous(range = c(0.5, 12))
+# 
+# ggplot() + 
+#   geom_sf(data = tracts09, fill = "white") + 
+#   geom_sf(data = summaryTable09, aes(size = Rent), shape = 21, 
+#           fill = "lightyellow", alpha = 0.7, show.legend = "point") + 
+#   scale_size_continuous(range = c(0.5, 12))
+ ```
+
+```{r graduate_symbol, warning = FALSE, message = FALSE}
+
+# Calculate centroids
+tract_centroids_all <- st_centroid(allTracts.group)
+# Create half-mile buffers
+tract_buffers_all <- st_buffer(tract_centroids_all, dist = 2640)
+
+clipAll <-
+  st_intersection(tract_buffers_all, mbta)
+
+summaryTableAll <- clipAll %>%
+  group_by(year, STATION) %>%
+  summarize(Total_pop = sum(TotalPop, na.rm = TRUE),
+           Rent = mean(MedRent.inf, na.rm = TRUE))
+
+ggplot() +
+  geom_sf(data = st_union(tracts19), fill = "lightgray") +
+  geom_sf(data = summaryTableAll, aes(size = Total_pop, fill = Total_pop), shape = 21,
+          alpha = 0.7, show.legend = "point") +
+  facet_wrap(~year) +
+  scale_size_continuous(range = c(0.5, 12)) +
+  scale_fill_gradient(low = 'white', high = 'darkblue') +
+  labs(title = "Population withn  1/2 Mile of Rapid Transit Stops", 
+       subtitle = "Suffolk County", caption = "Figure 3.4") +
+  mapTheme() +
+  theme(plot.title = element_text(size=20))
+
+ggplot() +
+  geom_sf(data = st_union(tracts19), fill = "lightgray") +
+  geom_sf(data = summaryTableAll, aes(size = Rent, fill = Rent), shape = 21,
+          alpha = 0.7, show.legend = "point") +
+  facet_wrap(~year) +
+  scale_size_continuous(range = c(0.5, 12)) +
+  scale_fill_gradient(low = 'white', high = '#756bb1') +
+  labs(title = "Median Rent within 1/2 Mile of\nRapid Transit Stops", 
+       subtitle = "Suffolk County (Adjusted for Inflation)",
+       caption = "Figure 3.5") +
+  mapTheme() + 
+  theme(plot.title = element_text(size=20))
+
+```
+
+
+6. Line Graph/MRB
+
+```{r MRB}
+mbta_MRB <- multipleRingBuffer(st_union(mbta),
+                                maxDistance = 31680,
+                                interval =  2640)
+```
+
+```{r warning = FALSE, message = FALSE}
+
+tracts19.rings <- tracts19 %>% 
+  select(GEOID, year) %>% 
+  st_centroid() %>% 
+  st_join(mbta_MRB, join = st_intersects) %>%
+  st_drop_geometry() %>%
+  left_join(dplyr::select(tracts19, GEOID, MedRent, year), 
+            by=c("GEOID"="GEOID", "year"="year")) %>%
+  st_sf() %>%
+  mutate(distance = distance / 5280) #convert to miles
+
+tracts09.rings <- tracts09 %>% 
+  select(GEOID, year) %>% 
+  st_centroid() %>% 
+  st_join(mbta_MRB, join = st_intersects) %>%
+  st_drop_geometry() %>%
+  left_join(dplyr::select(tracts09, GEOID, MedRent, year), 
+            by=c("GEOID"="GEOID", "year"="year")) %>%
+  st_sf() %>%
+  mutate(distance = distance / 5280) #convert to miles
+
+allTracts.rings <- rbind(tracts09.rings, tracts19.rings)
+
+allTracts.rings.summary <- st_drop_geometry(allTracts.rings) %>%
+    group_by(distance, year) %>%
+    summarize(Mean_Rent = mean(MedRent, na.rm=T))
+
+ggplot(allTracts.rings.summary,
+       aes(distance, Mean_Rent, colour=year)) +
+      geom_point(size=3) + 
+  geom_line(size=2) +
+  labs(title = "Rent as a Function of Distance from Transit Stop", subtitle = "Suffolk County",
+       caption = "Figure 3.6") +
+  theme(plot.title = element_text(size=20))
+
+```
