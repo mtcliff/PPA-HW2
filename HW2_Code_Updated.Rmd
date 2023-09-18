@@ -383,11 +383,14 @@ ggplot() +
           alpha = 0.7, show.legend = "point") +
   facet_wrap(~year) +
   scale_size_continuous(range = c(0.5, 12)) +
-  scale_fill_gradient(low = 'white', high = 'darkblue') +
+  scale_fill_gradient(low = '#f0f9e8', high = '#0868ac') + 
   labs(title = "Population withn  1/2 Mile of Rapid Transit Stops", 
-       subtitle = "Suffolk County", caption = "Figure 3.4") +
+       subtitle = "Suffolk County", caption = "Figure 3.5") +
   mapTheme() +
-  theme(plot.title = element_text(size=20))
+  theme(plot.title = element_text(size=20)) +
+  guides(size = guide_legend(title = "Total Population", 
+                             override.aes = list(alpha = 1, shape = 21)),
+         fill = guide_legend(title = "Total Population"))
 
 ggplot() +
   geom_sf(data = st_union(tracts19), fill = "lightgray") +
@@ -395,12 +398,15 @@ ggplot() +
           alpha = 0.7, show.legend = "point") +
   facet_wrap(~year) +
   scale_size_continuous(range = c(0.5, 12)) +
-  scale_fill_gradient(low = 'white', high = '#756bb1') +
+  scale_fill_gradient(low = '#f0f9e8', high = '#0868ac') +
   labs(title = "Median Rent within 1/2 Mile of\nRapid Transit Stops", 
        subtitle = "Suffolk County (Adjusted for Inflation)",
-       caption = "Figure 3.5") +
+       caption = "Figure 3.6") +
   mapTheme() + 
-  theme(plot.title = element_text(size=20))
+  theme(plot.title = element_text(size=20)) +
+  guides(size = guide_legend(title = "Total Population", 
+                             override.aes = list(alpha = 1, shape = 21)),
+         fill = guide_legend(title = "Total Population"))
 
 ```
 
